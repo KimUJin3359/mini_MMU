@@ -5,11 +5,11 @@
 - 3 level page table
   - `PD` -> `PMD` -> `PT`
 - 8 bits address
-  - 2 bits for PDE(Page Directory Entry)
-  - 2 bits for PMDE(Page Middle Directory Entry)
-  - 2 bits for PTE(Page Table Entry)
+  - 2 bits for `PDE(Page Directory Entry)`
+  - 2 bits for `PMDE(Page Middle Directory Entry)`
+  - 2 bits for `PTE(Page Table Entry)`
   - 2 bits for offset
-- 4 bytes page frame
+- 4 bytes `page frame`
   - 4 PDEs make up PD
   - 4 PMDEs make up PMD
   - 4 PTEs make up PT
@@ -23,7 +23,7 @@
   - Swap  
     - 7 bits(Swap Space offset) + 1 bit(Present bit)
 
-- PDBR == CR3
+- `PDBR` == `CR3`
   - starts at low address
 
 #### Function Info
