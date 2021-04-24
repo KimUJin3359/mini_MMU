@@ -17,8 +17,7 @@
 
 - format
   - PDE/PMDE/PTE
-    - 6 bits(PFN) + 2 bits(Offset, Present)
-    - originally, 1bit to present bit but it restricts only 8 bits address so offset bits uses like a present bit 
+    - 6 bits(PFN) + 2 bits(Offset, Present) 
     - unmapped PTE is filled with zeros
   - Swap  
     - 7 bits(Swap Space offset) + 1 bit(Present bit)
