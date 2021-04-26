@@ -183,7 +183,7 @@ int run_proc(s_memory mem, char pid, s_pte **cr3) {;
 			char cr3;
 			char pd, pmd, pt;
 
-			// exist swap memory to swap out
+			// physical memory to swap out
 			// cr3 of swap out page frame
 			for (pcb_i = 0; pcb_i < mem.pcb_size; pcb_i++) 
 			{
@@ -258,7 +258,7 @@ int find_cr3(s_memory mem, char pid)
 	return (-1);
 }
 
-// 210426
+// 210427
 int page_fault(s_memory mem, char pid, char va) {
 	char cr3 = -1;
 	// INDEX
