@@ -50,6 +50,8 @@ typedef struct	t_memory
 	struct pcb *pcb;
 }				s_memory;
 
+static int p_priority = 0;
+
 // memory init
 // allocate and initialize a physical memory
 void* mmu_init(unsigned int mem_size, unsigned int swap_size);
@@ -109,8 +111,116 @@ int find_pid_in_phys(s_memory mem, char pid)
 	return (-1);
 }
 
+
+int swap_out(s_memory mem, char pid, s_pte **cr3, int p_prior)
+{
+	int find;
+	int prior = 0;
+	int p_i, s_i;	// phyiscal memory idx, swap memory idx
+	int pcb_i;
+
+	find = 0;
+	// first, check (can swap out page frame is exist)
+	while (!find)
+	{
+		for (p_i = 0; p_i < mem.phys_index; p_i++)
+		{
+			// i is swap out page index
+			if (mem.phys_list[p_i].priority == prior)
+			{
+				find = 1;
+				break;
+			}
+		}
+		prior++;
+		// not exist page to swapout
+		if (prior == MAX_PRIOR)
+			return (-1);
+	}
+	find = 0;
+	// second, check (can swap out, if swap page is full or not full)
+	for (s_i = 0; s_i < mem.swap_index; s_i++)
+	{
+		if (mem.swap_list[s_i].pid == -1)
+		{
+			find = 1;
+			break;
+		}
+	}
+	// third, exist and can swap out -> swap out(change PTE to swap index+0, and allocate PD)
+	if (find) {
+		char p_cr3;
+		char pd, pmd, pt;
+
+		// physical memory to swap out
+		// cr3 of swap out page frame
+		for (pcb_i = 0; pcb_i < mem.pcb_size; pcb_i++)
+		{
+			if (mem.pcb[pcb_i].pid == mem.phys_list[p_i].pid)
+			{
+				p_cr3 = mem.pcb[pcb_i].cr3;
+				break;
+			}
+		}
+		//look cr3 -> find all PD, PMD, PT->PTE
+		find = 0;
+		for (int i = 0; i < 4; i++)
+		{
+			if (mem.phys_mem[p_cr3].pte[i] != 0)
+			{
+				pd = mem.phys_mem[p_cr3].pte[i];
+				pd >>= 2;
+				for (int j = 0; j < 4; j++)
+				{
+					if (mem.phys_mem[pd].pte[j] != 0)
+					{
+						pmd = mem.phys_mem[pd].pte[j];
+						pmd >>= 2;
+						for (int k = 0; k < 4; k++)
+						{
+							pt = mem.phys_mem[pmd].pte[k];
+							pt >>= 2;
+							if (pt == p_i) {
+								char pte;
+
+								pte = s_i;
+								// set present bit
+								pte++;
+								pte <<= 1;
+								mem.phys_mem[pt].pte[k] = pte;
+								find = 1;
+								break;
+							}
+						}
+						if (find)
+							break;
+					}
+				}
+				if (find)
+					break;
+			}
+		}
+		mem.phys_list[p_i].pid = pid;
+		if (p_prior == 0)
+			mem.phys_list[p_i].priority = MAX_PRIOR;
+		else
+			mem.phys_list[p_i].priority = p_prior++;
+		mem.pcb[mem.pcb_size].pid = pid;
+		mem.pcb[mem.pcb_size].cr3 = p_i;
+		mem.pcb_size++;
+		if (cr3 != NULL)
+			*(cr3) = &(mem.phys_mem[p_i].pte[0]);
+		mem.swap_list[s_i].pid = mem.pcb[pcb_i].pid;
+		return (0);
+	}
+	else
+		//not exist swap memory to swap out
+		return (-1);
+}
+
 // run process
-int run_proc(s_memory mem, char pid, s_pte **cr3) {;
+int run_proc(s_memory mem, char pid, s_pte **cr3) 
+{
 	int find = 0;
 	int init = 0;
 
@@ -129,7 +239,7 @@ int run_proc(s_memory mem, char pid, s_pte **cr3) {;
 	// find empty page table entry
 	find = find_pid_in_phys(mem, -1);
 	//if find ==1, exist free page for new PD
-	if (find != -1) 
+	if (find != -1)
 	{
 		mem.pcb[mem.pcb_size].pid = pid;
 		mem.pcb[mem.pcb_size].cr3 = find;
@@ -144,106 +254,8 @@ int run_proc(s_memory mem, char pid, s_pte **cr3) {;
 		return (0);
 	}
 	// not exist free page so swap out
-	else 
-	{
-		int prior = 0;
-		int p_i, s_i;	// phyiscal memory idx, swap memory idx
-		int pcb_i;
-
-		find = 0;
-		// first, check (can swap out page frame is exist)
-		while (!find) 
-		{
-			for (p_i = 0; p_i < mem.phys_index; p_i++) 
-			{
-				// i is swap out page index
-				if (mem.phys_list[p_i].priority == prior) 
-				{
-					find = 1;
-					break;	
-				}
-			}
-			prior++;
-			// not exist page to swapout
-			if (prior == MAX_PRIOR) 
-				return (-1);
-		}
-		find = 0;
-		// second, check (can swap out, if swap page is full or not full)
-		for (s_i = 0; s_i < mem.swap_index; s_i++) 
-		{
-			if (mem.swap_list[s_i].pid == -1) 
-			{
-				find = 1;
-				break;
-			}
-		}
-		// third, exist and can swap out -> swap out(change PTE to swap index+0, and allocate PD)
-		if (find) {
-			char cr3;
-			char pd, pmd, pt;
-
-			// physical memory to swap out
-			// cr3 of swap out page frame
-			for (pcb_i = 0; pcb_i < mem.pcb_size; pcb_i++) 
-			{
-				if (mem.pcb[pcb_i].pid == phys_list[p_i].pid) 
-				{
-					cr3 = mem.pcb[pcb_i].cr3;
-					break;
-				}
-			}
-			//look cr3 -> find all PD, PMD, PT->PTE
-			find = 0;
-			for (int i = 0; i < 4; i++) 
-			{
-				if (mem.phys_mem[cr3].pte[i] != 0) 
-				{
-					pd = mem.phys_mem[cr3].pte[i];
-					pd >>= 2;
-					for (int j = 0; j < 4; j++) 
-					{
-						if (mem.phys_mem[pd].pte[j] != 0) 
-						{
-							pmd = mem.phys_mem[pd].pte[j];
-							pmd >>= 2;
-							for (int k = 0; k < 4; k++) 
-							{
-								pt = mem.phys_mem[pmd].pte[k];
-								pt >>= 2;
-								if (pt == p_i) {
-									char pte;
-
-									pte = s_i;
-									// set present bit
-									pte++;
-									pte <<= 1;
-									mem.phys_mem[pt].pte[k] = pte;
-									find = 1;
-									break;
-								}
-							}
-							if (find)
-								break;
-						}
-					}
-					if (find)
-						break;
-				}
-			}
-			mem.phys_list[p_i].pid = pid;
-			mem.phys_list[p_i].priority = MAX_PRIOR;
-			mem.pcb[mem.pcb_size].pid = pid;
-			mem.pcb[mem.pcb_size].cr3 = p_i;
-			mem.pcb_size++;
-			*(cr3) = &(mem.phys_mem[p_i].pte[0]);
-			mem.swap_list[s_i].pid = mem.pcb[pcb_i].pid;
-		}
-		else 
-			//not exist swap memory to swap out
-			return (-1);
-	}
-	return (-1);
+	else
+		return (swap_out(mem, pid, cr3, 0));
 }
 
 int find_cr3(s_memory mem, char pid)
@@ -273,9 +285,8 @@ int page_fault(s_memory mem, char pid, char va) {
 
 	// find cr3
 	cr3 = find_cr3(mem, pid);
-	if (cr3 == -1) {
+	if (cr3 == -1) 
 		return (-1);
-	}
 
 	// find PD, PMD, PT index
 	// example
@@ -290,426 +301,87 @@ int page_fault(s_memory mem, char pid, char va) {
 	pmde_index = pmde_index >> 4;
 	pte_index = PT_MASK & va;
 	pte_index = pte_index >> 2;
+	// PD is already exist, because of run_proc
+	if ((mem.phys_mem[cr3].pte[pde_index] & PR_BIT) == 0) 
+	{
+		// new PMD in PDE, and allocate in real_memory
+		int find = find_pid_in_phys(mem, -1);
 
-	//PD is already exist, because of run_proc
-	if ((ku_h_phys_mem[cr3].pte[pde_index] & get_Present) == 0) {
-		int flag = 0;
-		//new PMD in PDE, and allocate in real_memory
-		for (i = 0; i < ku_h_phys_index; i++) {
-			if (ku_h_phys_list[i].pid == -1) {
-				flag = 1;
-				break;	//if flag == 1, exist free page for new PD
-				//use i for PMD
-			}
+		if (find != -1) 
+		{
+			mem.phys_list[find].pid = pid;
+			pmd_base = find;
+			mem.phys_mem[cr3].pte[pde_index] = (find << 2) + 1;
 		}
-
-		if (flag == 1) {
-			ku_h_phys_list[i].pid = pid;
-
-			pmd_base = i;
-			ku_h_phys_mem[cr3].pte[pde_index] = (i << 2) + 1;
-		}
-		else {
-			//swap out
-			int now = 0;
-			//First, check(can swap out page frame is exist)
-			while (flag == 0) {
-				for (j = 0; j < ku_h_phys_index; j++) {
-					if (ku_h_phys_list[j].priority == now) {
-						flag = 1;
-						break;
-					}
-				}
-				now++;
-
-				if (now == 8193) {
-					return -1;
-					//doesn't exist page to swap out
-				}
-			}
-
-			flag = 0;
-			//Second check(can swap out, if swap page is full or not full)
-			for (k = 0; k < ku_h_swap_index; k++) {
-				if (ku_h_swap_list[k].pid == -1) {
-					flag = 1;
-					break;
-				}
-			}
-			//Third, exist and can swap out -> swap out (change PTE to swap index+1, and allocate PD)
-			if (flag == 1) {
-				char s_cr3;
-				char buf, buf2, buf3;
-				int a, b, c;
-
-				//exist swap memory to swap out
-				for (h = 0; h < ku_h_pcb_size; h++) {
-					if (ku_h_pcb[h].pid == ku_h_phys_list[j].pid) {
-						s_cr3 = ku_h_pcb[h].ku_cr3;
-						break;
-					}
-				}
-				//look ku_cr3 -> find all PD, PMD, PT->PTE
-				for (a = 0; a < 4; a++) {
-					if (ku_h_phys_mem[s_cr3].pte[a] != 0) {
-						buf = ku_h_phys_mem[s_cr3].pte[a];
-						buf = buf >> 2;
-						for (b = 0; b < 4; b++) {
-							if (ku_h_phys_mem[buf].pte[b] != 0) {
-								buf2 = ku_h_phys_mem[buf].pte[b];
-								buf2 = buf2 >> 2;
-								for (c = 0; c < 4; c++) {
-									buf3 = ku_h_phys_mem[buf2].pte[c];
-									buf3 = buf3 >> 2;
-									if (buf3 == j) {
-										char d;
-										d = k;
-										d++;
-										d = d << 1;
-
-										ku_h_phys_mem[buf2].pte[c] = d;
-									}
-								}
-							}
-						}
-					}
-				}
-
-				ku_h_phys_list[j].pid = pid;
-				ku_h_phys_list[j].priority = 8194;
-				ku_h_swap_list[k].pid = ku_h_pcb[h].pid;
-
-				ku_h_phys_mem[cr3].pte[pde_index]=(j<<2)+1;
-				pmd_base = j;
-			}
-			else {
-				//not exist swap free page
-				return -1;
-			}
+		// swap out
+		else
+		{
+			if (swap_out(mem, pid, NULL, 0) == -1)
+				return (-1);
 		}
 	}
-	else {
-		//PMD is allocated
-		pmd_base = ku_h_phys_mem[cr3].pte[pde_index] >> 2;
-	}
+	// PMD is allocated
+	else 
+		pmd_base = mem.phys_mem[cr3].pte[pde_index] >> 2;
 
-	//PMD is allocated
-	if ((ku_h_phys_mem[pmd_base].pte[pmde_index] & get_Present) == 0) {
-		int flag = 0;
-		//new PT in PMDE, and allocate in real_memory
-		for (i = 0; i < ku_h_phys_index; i++) {
-			if (ku_h_phys_list[i].pid == -1) {
-				flag = 1;
-				break;	//if flag == 1, exist free page for new PD
-				//use i for PT
-			}
+	// PMD is allocated
+	if ((mem.phys_mem[pmd_base].pte[pmde_index] & PR_BIT) == 0) 
+	{
+		int find = find_pid_in_phys(mem, -1);
+
+		if (find != -1) 
+		{
+			mem.phys_list[find].pid = pid;
+			pt_base = find;
+			mem.phys_mem[pmd_base].pte[pmde_index] = (find << 2) + 1;
 		}
-
-		if (flag == 1) {
-			ku_h_phys_list[i].pid = pid;
-
-			pt_base = i;
-			ku_h_phys_mem[pmd_base].pte[pmde_index] = (i << 2) + 1;
-		}
-		else {
-			//swap out
-			int now = 0;
-			//First, check(can swap out page frame is exist)
-			while (flag == 0) {
-				for (j = 0; j < ku_h_phys_index; j++) {
-					if (ku_h_phys_list[j].priority == now) {
-						flag = 1;
-						break;
-					}
-				}
-				now++;
-
-				if (now == 8193) {
-					return -1;
-					//doesn't exist page to swap out
-				}
-			}
-
-			flag = 0;
-			//Second check(can swap out, if swap page is full or not full)
-			for (k = 0; k < ku_h_swap_index; k++) {
-				if (ku_h_swap_list[k].pid == -1) {
-					flag = 1;
-					break;
-				}
-			}
-			//Third, exist and can swap out -> swap out (change PTE to swap index+1, and allocate PD)
-			if (flag == 1) {
-				char s_cr3;
-				char buf, buf2, buf3;
-				int a, b, c;
-
-				//exist swap memory to swap out
-				for (h = 0; h < ku_h_pcb_size; h++) {
-					if (ku_h_pcb[h].pid == ku_h_phys_list[j].pid) {
-						s_cr3 = ku_h_pcb[h].ku_cr3;
-						break;
-					}
-				}
-				//look ku_cr3 -> find all PD, PMD, PT -> PTE
-				for (a = 0; a < 4; a++) {
-					if (ku_h_phys_mem[s_cr3].pte[a] != 0) {
-						buf = ku_h_phys_mem[s_cr3].pte[a];
-						buf = buf >> 2;
-						for (b = 0; b < 4; b++) {
-							if (ku_h_phys_mem[buf].pte[b] != 0) {
-								buf2 = ku_h_phys_mem[buf].pte[b];
-								buf2 = buf2 >> 2;
-								for (c = 0; c < 4; c++) {
-									buf3 = ku_h_phys_mem[buf2].pte[c];
-									buf3 = buf3 >> 2;
-									if (buf3 == j) {
-										char d;
-										d = k;
-										d++;
-										d = d << 1;
-
-										ku_h_phys_mem[buf2].pte[c] = d;
-									}
-								}
-							}
-						}
-					}
-				}
-
-				ku_h_phys_list[j].pid = pid;
-				ku_h_phys_list[j].priority = 8194;
-				ku_h_swap_list[k].pid = ku_h_pcb[h].pid;
-				pt_base = j;
-
-				ku_h_phys_mem[pmd_base].pte[pmde_index]=(j<<2)+1;
-			}
-			else {
-				//not exist swap free page
-				return -1;
-			}
+		// swap out
+		else
+		{
+			if (swap_out(mem, pid, NULL, 0) == -1)
+				return (-1);
 		}
 	}
-	else {
-		//PMDE is allocated
-		pt_base = ku_h_phys_mem[pmd_base].pte[pmde_index] >> 2;
-	}
+	// PMDE is allocated
+	else 
+		pt_base = mem.phys_mem[pmd_base].pte[pmde_index] >> 2;
 
-	//PT is allocated
-	//first. new allocated Page Frame, second. swapped out Page frame
-	if (ku_h_phys_mem[pt_base].pte[pte_index] == 0) {
+	// PT is allocated
+	// 1. new allocated Page Frame
+	if (mem.phys_mem[pt_base].pte[pte_index] == 0) 
+	{
 		//new PF, allocate in real memory
-		int flag = 0;
+		int find = find_pid_in_phys(mem, -1);
 
-		for (i = 0; i < ku_h_phys_index; i++) {
-			if (ku_h_phys_list[i].pid == -1) {
-				flag = 1;
-				break;	//if flag == 1, exist free page for new PD
-			}
+		if (find != -1)
+		{
+			mem.phys_list[find].pid = pid;
+			mem.phys_list[find].priority = p_priority;
+			p_priority++;
+			mem.phys_mem[pt_base].pte[pte_index] = (find << 2) + 1;
+			return (0);
 		}
-
-		if (flag == 1) {
-			ku_h_phys_list[i].pid = pid;
-			ku_h_phys_list[i].priority = ku_h_priority;
-			ku_h_priority++;
-			ku_h_phys_mem[pt_base].pte[pte_index] = (i << 2) + 1;
-			
-			return 0;
-		}
-		else {
-			//swap out
-			int now = 0;
-			//First, check(can swap out page frame is exist)
-			while (flag == 0) {
-				for (j = 0; j < ku_h_phys_index; j++) {
-					if (ku_h_phys_list[j].priority == now) {
-						flag = 1;
-						break;
-					}
-				}
-				now++;
-
-				if (now == 8193) {
-					return -1;
-					//doesn't exist page to swap out
-				}
-			}
-
-			flag = 0;
-			//Second, check can swap out, if swap page is full or not full
-			for (k = 0; k < ku_h_swap_index; k++) {
-				if (ku_h_swap_list[k].pid == -1) {
-					flag = 1;
-					break;
-				}
-			}
-			//Third, exist and can swap out -> swap out (change PTE to swap index + 1, and allocate PD)
-			if (flag == 1) {
-				char s_cr3;
-				char buf, buf2, buf3;
-				int a, b, c;
-
-				//exist swap memory to swap out
-				for (h = 0; h < ku_h_pcb_size; h++) {
-					if (ku_h_pcb[h].pid == ku_h_phys_list[j].pid) {
-						s_cr3 = ku_h_pcb[h].ku_cr3;
-						break;
-					}
-				}
-				//look ku_cr3 => find all PD, PMD, PT -> PTE
-				for (a = 0; a < 4; a++) {
-					if (ku_h_phys_mem[s_cr3].pte[a] != 0) {
-						buf = ku_h_phys_mem[s_cr3].pte[a];
-						buf = buf >> 2;
-						for (b = 0; b < 4; b++) {
-							if (ku_h_phys_mem[buf].pte[b] != 0) {
-								buf2 = ku_h_phys_mem[buf].pte[b];
-								buf2 = buf2 >> 2;
-								for (c = 0; c < 4; c++) {
-									buf3 = ku_h_phys_mem[buf2].pte[c];
-									buf3 = buf3 >> 2;
-									if (buf3 == j) {
-										char d;
-										d = k;
-										d++;
-										d = d << 1;
-
-										ku_h_phys_mem[buf2].pte[c] = d;
-									}
-								}
-							}
-						}
-					}
-				}
-
-				ku_h_phys_list[j].pid = pid;
-				ku_h_phys_list[j].priority = ku_h_priority;
-				ku_h_priority++;
-				ku_h_swap_list[k].pid = ku_h_pcb[h].pid;
-
-				ku_h_phys_mem[pt_base].pte[pte_index] = (j << 2) + 1;
-			
-				return 0;
-			}
-			else {
-				//not exist swap free page
-				return -1;
-			}
-
-			return -1;
-		}
+		else
+			return (swap_out(mem, pid, NULL, 1));
 	}
-	else {
-		//swapped out PF
-		//swap index>>1 , -1 -> swap real index
-		int flag = 0;
+	// 2. swapped out Page Frame
+	else 
+	{
+		//swap index >> 1 , -1 -> swap real index
+		int find = find_pid_in_phys(mem, -1);
 		char swap_s;
-		//new PF allocate in real _memory
-		for (i = 0; i < ku_h_phys_index; i++) {
-			if (ku_h_phys_list[i].pid == -1) {
-				flag = 1;
-				break;
-			}
-		}
 
-		if (flag == 1) {
-			ku_h_phys_list[i].pid = pid;
-			swap_s = ku_h_phys_mem[pt_base].pte[pte_index];
+		if (find != -1) 
+		{
+			mem.phys_list[find].pid = pid;
+			swap_s = mem.phys_mem[pt_base].pte[pte_index];
 			swap_s = swap_s >> 1;
 			swap_s--;
-
-			ku_h_swap_list[swap_s].pid = -1;
-			ku_h_phys_mem[pt_base].pte[pte_index] = (i << 2) + 1;
-
-			return 0;
+			mem.swap_list[swap_s].pid = -1;
+			mem.phys_mem[pt_base].pte[pte_index] = (find << 2) + 1;
+			return (0);
 		}
-
-		else {
-			//swap out
-			int now = 0;
-			while (flag == 0) {
-				for (j = 0; j < ku_h_phys_index; j++) {
-					if (ku_h_phys_list[j].priority == now) {
-						flag = 1;
-						break;
-					}
-				}
-				now++;
-
-				if (now == 8193) {
-					return -1;
-					//doesn't exist page to swap out
-				}
-			}
-
-			flag = 0;
-			//Second check(can swap out, if swap page is full or not full)
-			for (k = 0; k < ku_h_swap_index; k++) {
-				if (ku_h_swap_list[k].pid == -1) {
-					flag = 1;
-					break;
-				}
-			}
-			//Third, exist and can swap out-> swap out (change PTe to swap index+1, and allocate PF)
-			if (flag == 1) {
-				char s_cr3;
-				char buf, buf2, buf3;
-				int a, b, c;
-
-				//exist swap memory to swap out
-				for (h = 0; h < ku_h_swap_index; h++) {
-					if (ku_h_pcb[h].pid == ku_h_phys_list[j].pid) {
-						s_cr3 = ku_h_pcb[h].ku_cr3;
-						break;
-					}
-				}
-
-				for (a = 0; a < 4; a++) {
-					if (ku_h_phys_mem[s_cr3].pte[a] != 0) {
-						buf = ku_h_phys_mem[s_cr3].pte[a];
-						buf = buf >> 2;
-						for (b = 0; b < 4; b++) {
-							if (ku_h_phys_mem[buf].pte[b] != 0) {
-								buf2 = ku_h_phys_mem[buf].pte[b];
-								buf2 = buf2 >> 2;
-								for (c = 0; c < 4; c++) {
-									buf3 = ku_h_phys_mem[buf2].pte[c];
-									buf3 = buf3 >> 2;
-									if (buf3 == j) {
-										char d;
-										d = k;
-										d++;
-										d = d << 1;
-
-										ku_h_phys_mem[buf2].pte[c] = d;
-									}
-								}
-							}
-						}
-					}
-				}
-
-				ku_h_phys_list[j].pid = pid;
-				ku_h_phys_list[j].priority=ku_h_priority;
-				ku_h_priority++;
-				ku_h_swap_list[k].pid = ku_h_pcb[h].pid;
-
-				swap_s = ku_h_phys_mem[pt_base].pte[pte_index];
-				swap_s = swap_s >> 1;
-				swap_s--;
-
-				ku_h_swap_list[swap_s].pid = -1;
-				ku_h_phys_mem[pt_base].pte[pte_index] = (j << 2) + 1;
-
-				return 0;
-			}
-			else {
-				//not exist swap free page
-				return -1;
-			}
-		}
-		//change swap list to initialize value
+		else 
+			return (swap_out(mem, pid, NULL, 1));
 	}
-
-	return -1;
 }
